@@ -2,12 +2,11 @@ from typing import Type
 from sqlalchemy import text, insert, update, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from datetime import date
 
 from project.infrastructure.postgres.models import Author  # Модель для таблицы Autor
 from project.schemas.authorSchema import AuthorSchema, AuthorCreateUpdateSchema
-from datetime import date
 
-from pydantic import ValidationError
 
 class AuthorRepository:
     _collection: Type[Author] = Author
@@ -22,26 +21,98 @@ class AuthorRepository:
 
         return True if result else False
 
-    async def get_all_authorsBooks(
+    async def get_all_authors(
             self,
             session: AsyncSession,
     ) -> list[AuthorSchema]:
         query = select(self._collection)
 
-        authors = await session.scalars(query)
+        query = "SELECT * FROM author;"
+        result = await session.execute(text(query))
 
-        return [AuthorSchema.model_validate(obj=val) for val in authors.all()]
+        return [
+            AuthorSchema.model_validate(dict(author))
+            for author in result.mappings().all()
+        ]
 
     async def get_by_id(
             self,
             session: AsyncSession,
-            authors_book_id: int
+            id_author: int
     ) -> AuthorSchema:
-        query = select(self._collection).where(self._collection.id_authors_book == authors_book_id)
+        query = text("SELECT * FROM author WHERE id = :id;")
+        result = await session.execute(query, {"id": id_author})
 
-        result = await session.scalar(query)
+        author_row = result.mappings().first()
 
-        if not result:
-            raise AuthorsBookNotFound(_id=authors_book_id)
+        if author_row:
+            return AuthorSchema.model_validate(dict(author_row))
 
-        return AuthorsBookSchema.model_validate(obj=result)
+        return None
+
+    async def insert_author(
+            self,
+            session: AsyncSession,
+            id: int,
+            name: str,
+            date_of_birth: date,
+    ) -> AuthorSchema | None:
+
+        query = text("""
+            INSERT INTO author (name, date_of_birth) 
+            VALUES (:name, :date_of_birth)
+            RETURNING id, name, date_of_birth
+        """)
+
+        result = await session.execute(query, {
+            "name": name,
+            "date_of_birth": date_of_birth
+        })
+
+        author_row = result.mappings().first()
+
+        if author_row:
+            return AuthorSchema.model_validate(dict(author_row))
+
+        return None
+
+    async def update_author_by_id(
+            self,
+            session: AsyncSession,
+            id: int,
+            name: str,
+            date_of_birth: date
+    ) -> AuthorSchema | None:
+
+        query = text("""
+            UPDATE author 
+            SET name = :name, date_of_birth = :date_of_birth
+            WHERE id = :id 
+            RETURNING id, name, date_of_birth
+        """)
+
+        result = await session.execute(query, {
+            "id": id,
+            "name": name,
+            "date_of_birth": date_of_birth
+        })
+
+        updated_row = result.mappings().first()
+
+        if updated_row:
+            return AuthorSchema.model_validate(dict(updated_row))
+
+        return None
+
+    async def delete_author_by_id(
+            self,
+            session: AsyncSession,
+            id: int
+    ) -> bool:
+
+        query = text("DELETE FROM author WHERE id = :id RETURNING id")
+        result = await session.execute(query, {"id": id})
+
+        deleted_row = result.fetchone()
+
+        return deleted_row is not None
